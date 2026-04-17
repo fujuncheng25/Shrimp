@@ -11,7 +11,7 @@
       <header class="hero">
         <p class="eyebrow">Coordinate Dimming Lens</p>
         <h1>本地坐标驱动的页面聚焦</h1>
-        <p class="lede">输入一个本地 URL，扩展会读取坐标并让焦点区域以外的内容轻微降亮、降对比度。</p>
+        <p class="lede">输入一个本地 URL，扩展会读取坐标并以椭圆焦点渐变突出中心区域。</p>
       </header>
 
       <section class="card">
@@ -36,15 +36,39 @@
           </label>
         </div>
 
-        <div class="grid three-up">
+        <div class="grid two-up">
           <label>
-            聚焦半径
-            <input id="focusRadius" type="number" min="40" max="1200" step="10" />
+            椭圆半径 X
+            <input id="focusRadiusX" type="number" min="40" max="1600" step="10" />
           </label>
 
           <label>
+            椭圆半径 Y
+            <input id="focusRadiusY" type="number" min="40" max="1600" step="10" />
+          </label>
+        </div>
+
+        <div class="grid two-up">
+          <label>
+            焦点偏移 X（px）
+            <input id="focusOffsetX" type="number" min="-3000" max="3000" step="1" />
+          </label>
+
+          <label>
+            焦点偏移 Y（px）
+            <input id="focusOffsetY" type="number" min="-3000" max="3000" step="1" />
+          </label>
+        </div>
+
+        <div class="grid three-up">
+          <label>
             边缘过渡
             <input id="feather" type="number" min="4" max="400" step="4" />
+          </label>
+
+          <label>
+            动画时长（ms）
+            <input id="transitionMs" type="number" min="0" max="2000" step="10" />
           </label>
 
           <label>

@@ -3,8 +3,12 @@ const DEFAULTS = {
   localUrl: 'http://127.0.0.1:3000/coordinate',
   pollInterval: 1000,
   coordinateSpace: 'auto',
-  focusRadius: 180,
+  focusRadiusX: 220,
+  focusRadiusY: 150,
+  focusOffsetX: 0,
+  focusOffsetY: 0,
   feather: 96,
+  transitionMs: 220,
   brightness: 0.96,
   contrast: 0.88,
   saturate: 0.92,
@@ -16,8 +20,12 @@ const form = {
   localUrl: document.getElementById('localUrl'),
   pollInterval: document.getElementById('pollInterval'),
   coordinateSpace: document.getElementById('coordinateSpace'),
-  focusRadius: document.getElementById('focusRadius'),
+  focusRadiusX: document.getElementById('focusRadiusX'),
+  focusRadiusY: document.getElementById('focusRadiusY'),
+  focusOffsetX: document.getElementById('focusOffsetX'),
+  focusOffsetY: document.getElementById('focusOffsetY'),
   feather: document.getElementById('feather'),
+  transitionMs: document.getElementById('transitionMs'),
   brightness: document.getElementById('brightness'),
   contrast: document.getElementById('contrast'),
   saturate: document.getElementById('saturate'),
@@ -41,10 +49,34 @@ async function initialize() {
 
 function loadSettings() {
   return new Promise((resolve) => {
-    chrome.storage.sync.get(DEFAULTS, (stored) => {
-      resolve({ ...DEFAULTS, ...stored });
+    chrome.storage.sync.get({ ...DEFAULTS, focusRadius: DEFAULTS.focusRadiusX }, (stored) => {
+      resolve(normalizeLoadedSettings(stored));
     });
   });
+}
+
+function normalizeLoadedSettings(stored) {
+  const source = stored && typeof stored === 'object' ? stored : {};
+  const legacyRadius = toClampedNumber(source.focusRadius, 40, 1600, DEFAULTS.focusRadiusX);
+  const focusRadiusX = toClampedNumber(source.focusRadiusX, 40, 1600, legacyRadius);
+  const focusRadiusY = toClampedNumber(source.focusRadiusY, 40, 1600, legacyRadius);
+  const maxFeather = Math.max(4, Math.min(focusRadiusX, focusRadiusY) - 2);
+
+  return {
+    ...DEFAULTS,
+    ...source,
+    focusRadiusX,
+    focusRadiusY,
+    focusOffsetX: toClampedNumber(source.focusOffsetX, -3000, 3000, DEFAULTS.focusOffsetX),
+    focusOffsetY: toClampedNumber(source.focusOffsetY, -3000, 3000, DEFAULTS.focusOffsetY),
+    feather: toClampedNumber(source.feather, 4, Math.min(600, maxFeather), DEFAULTS.feather),
+    transitionMs: toClampedNumber(source.transitionMs, 0, 2000, DEFAULTS.transitionMs),
+    brightness: toClampedNumber(source.brightness, 0.5, 1.2, DEFAULTS.brightness),
+    contrast: toClampedNumber(source.contrast, 0.5, 1.2, DEFAULTS.contrast),
+    saturate: toClampedNumber(source.saturate, 0.5, 1.5, DEFAULTS.saturate),
+    overlayTint: toClampedNumber(source.overlayTint, 0, 0.35, DEFAULTS.overlayTint),
+    pollInterval: toClampedNumber(source.pollInterval, 300, 10000, DEFAULTS.pollInterval),
+  };
 }
 
 function fillForm(settings) {
@@ -52,8 +84,12 @@ function fillForm(settings) {
   form.localUrl.value = settings.localUrl ?? '';
   form.pollInterval.value = settings.pollInterval ?? DEFAULTS.pollInterval;
   form.coordinateSpace.value = settings.coordinateSpace ?? DEFAULTS.coordinateSpace;
-  form.focusRadius.value = settings.focusRadius ?? DEFAULTS.focusRadius;
+  form.focusRadiusX.value = settings.focusRadiusX ?? DEFAULTS.focusRadiusX;
+  form.focusRadiusY.value = settings.focusRadiusY ?? DEFAULTS.focusRadiusY;
+  form.focusOffsetX.value = settings.focusOffsetX ?? DEFAULTS.focusOffsetX;
+  form.focusOffsetY.value = settings.focusOffsetY ?? DEFAULTS.focusOffsetY;
   form.feather.value = settings.feather ?? DEFAULTS.feather;
+  form.transitionMs.value = settings.transitionMs ?? DEFAULTS.transitionMs;
   form.brightness.value = settings.brightness ?? DEFAULTS.brightness;
   form.contrast.value = settings.contrast ?? DEFAULTS.contrast;
   form.saturate.value = settings.saturate ?? DEFAULTS.saturate;
@@ -73,17 +109,25 @@ async function saveSettings() {
 }
 
 function readForm() {
+  const focusRadiusX = toClampedNumber(form.focusRadiusX.value, 40, 1600, DEFAULTS.focusRadiusX);
+  const focusRadiusY = toClampedNumber(form.focusRadiusY.value, 40, 1600, DEFAULTS.focusRadiusY);
+  const maxFeather = Math.max(4, Math.min(focusRadiusX, focusRadiusY) - 2);
+
   return {
     enabled: form.enabled.checked,
     localUrl: form.localUrl.value.trim(),
-    pollInterval: toNumber(form.pollInterval.value, DEFAULTS.pollInterval),
+    pollInterval: toClampedNumber(form.pollInterval.value, 300, 10000, DEFAULTS.pollInterval),
     coordinateSpace: form.coordinateSpace.value,
-    focusRadius: toNumber(form.focusRadius.value, DEFAULTS.focusRadius),
-    feather: toNumber(form.feather.value, DEFAULTS.feather),
-    brightness: toNumber(form.brightness.value, DEFAULTS.brightness),
-    contrast: toNumber(form.contrast.value, DEFAULTS.contrast),
-    saturate: toNumber(form.saturate.value, DEFAULTS.saturate),
-    overlayTint: toNumber(form.overlayTint.value, DEFAULTS.overlayTint),
+    focusRadiusX,
+    focusRadiusY,
+    focusOffsetX: toClampedNumber(form.focusOffsetX.value, -3000, 3000, DEFAULTS.focusOffsetX),
+    focusOffsetY: toClampedNumber(form.focusOffsetY.value, -3000, 3000, DEFAULTS.focusOffsetY),
+    feather: toClampedNumber(form.feather.value, 4, Math.min(600, maxFeather), DEFAULTS.feather),
+    transitionMs: toClampedNumber(form.transitionMs.value, 0, 2000, DEFAULTS.transitionMs),
+    brightness: toClampedNumber(form.brightness.value, 0.5, 1.2, DEFAULTS.brightness),
+    contrast: toClampedNumber(form.contrast.value, 0.5, 1.2, DEFAULTS.contrast),
+    saturate: toClampedNumber(form.saturate.value, 0.5, 1.5, DEFAULTS.saturate),
+    overlayTint: toClampedNumber(form.overlayTint.value, 0, 0.35, DEFAULTS.overlayTint),
   };
 }
 
@@ -118,9 +162,13 @@ async function testEndpoint() {
   }
 }
 
-function toNumber(value, fallback) {
+function toClampedNumber(value, min, max, fallback) {
   const numeric = Number(value);
-  return Number.isFinite(numeric) ? numeric : fallback;
+  if (!Number.isFinite(numeric)) {
+    return fallback;
+  }
+
+  return Math.min(max, Math.max(min, numeric));
 }
 
 async function ensureOriginPermission(urlString) {

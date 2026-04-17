@@ -3,8 +3,12 @@ const SETTINGS_DEFAULTS = {
   localUrl: 'http://127.0.0.1:3000/coordinate',
   pollInterval: 1000,
   coordinateSpace: 'auto',
-  focusRadius: 180,
+  focusRadiusX: 220,
+  focusRadiusY: 150,
+  focusOffsetX: 0,
+  focusOffsetY: 0,
   feather: 96,
+  transitionMs: 220,
   brightness: 0.96,
   contrast: 0.88,
   saturate: 0.92,
@@ -13,6 +17,7 @@ const SETTINGS_DEFAULTS = {
 
 const OUTSIDE_TEXT_CLASS = 'shrimp-coordinate-lens__outside-text';
 const MAX_TINTED_TEXT_ELEMENTS = 2200;
+const TEXT_TINT_UPDATE_INTERVAL_MS = 120;
 const EXCLUDED_TINT_TAGS = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEXTAREA', 'INPUT', 'SELECT', 'OPTION']);
 
 let settings = { ...SETTINGS_DEFAULTS };
@@ -20,6 +25,11 @@ let overlayRoot = null;
 let pollTimer = null;
 let lastPointerCoordinate = null;
 let outsideTintedElements = new Set();
+let targetCoordinate = null;
+let renderedCoordinate = null;
+let animationFrameId = null;
+let animationLastTimestamp = 0;
+let lastTextTintUpdateTimestamp = 0;
 
 initialize().catch((error) => {
   console.error('Coordinate Dimming Lens initialization failed:', error);
@@ -36,7 +46,7 @@ async function initialize() {
   if (chrome.runtime?.onMessage) {
     chrome.runtime.onMessage.addListener((message) => {
       if (message?.type === 'lens-settings-updated') {
-        settings = { ...settings, ...message.settings };
+        settings = normalizeSettings({ ...settings, ...message.settings });
         refreshPolling();
       }
     });
@@ -45,9 +55,12 @@ async function initialize() {
 
 function loadSettings() {
   return new Promise((resolve) => {
-    chrome.storage.sync.get(SETTINGS_DEFAULTS, (stored) => {
-      resolve({ ...SETTINGS_DEFAULTS, ...stored });
-    });
+    chrome.storage.sync.get(
+      { ...SETTINGS_DEFAULTS, focusRadius: SETTINGS_DEFAULTS.focusRadiusX },
+      (stored) => {
+        resolve(normalizeSettings(stored));
+      }
+    );
   });
 }
 
@@ -58,7 +71,7 @@ function handleStorageChange(changes, areaName) {
 
   const updated = {};
   for (const [key, change] of Object.entries(changes)) {
-    if (Object.prototype.hasOwnProperty.call(SETTINGS_DEFAULTS, key)) {
+    if (Object.prototype.hasOwnProperty.call(SETTINGS_DEFAULTS, key) || key === 'focusRadius') {
       updated[key] = change.newValue;
     }
   }
@@ -67,7 +80,7 @@ function handleStorageChange(changes, areaName) {
     return;
   }
 
-  settings = { ...settings, ...updated };
+  settings = normalizeSettings({ ...settings, ...updated });
   refreshPolling();
 }
 
@@ -117,8 +130,10 @@ function ensureOverlay() {
       contain: strict;
       --shrimp-focus-x: 50vw;
       --shrimp-focus-y: 50vh;
-      --shrimp-focus-radius: ${SETTINGS_DEFAULTS.focusRadius}px;
-      --shrimp-focus-feather: ${SETTINGS_DEFAULTS.feather}px;
+      --shrimp-focus-radius-x: ${SETTINGS_DEFAULTS.focusRadiusX}px;
+      --shrimp-focus-radius-y: ${SETTINGS_DEFAULTS.focusRadiusY}px;
+      --shrimp-focus-inner-stop: 56%;
+      --shrimp-focus-outer-stop: 100%;
       --shrimp-brightness: ${SETTINGS_DEFAULTS.brightness};
       --shrimp-contrast: ${SETTINGS_DEFAULTS.contrast};
       --shrimp-saturate: ${SETTINGS_DEFAULTS.saturate};
@@ -137,19 +152,19 @@ function ensureOverlay() {
       backdrop-filter: brightness(var(--shrimp-brightness)) contrast(var(--shrimp-contrast)) saturate(var(--shrimp-saturate));
       -webkit-backdrop-filter: brightness(var(--shrimp-brightness)) contrast(var(--shrimp-contrast)) saturate(var(--shrimp-saturate));
       -webkit-mask-image: radial-gradient(
-        circle at var(--shrimp-focus-x) var(--shrimp-focus-y),
+        ellipse var(--shrimp-focus-radius-x) var(--shrimp-focus-radius-y) at var(--shrimp-focus-x) var(--shrimp-focus-y),
         transparent 0,
-        transparent calc(var(--shrimp-focus-radius) - var(--shrimp-focus-feather)),
-        rgba(0, 0, 0, 0.25) calc(var(--shrimp-focus-radius) - 12px),
-        rgba(0, 0, 0, 0.92) calc(var(--shrimp-focus-radius) + var(--shrimp-focus-feather)),
+        transparent var(--shrimp-focus-inner-stop),
+        rgba(0, 0, 0, 0.25) calc(var(--shrimp-focus-inner-stop) + 3%),
+        rgba(0, 0, 0, 0.92) var(--shrimp-focus-outer-stop),
         rgba(0, 0, 0, 1) 100%
       );
       mask-image: radial-gradient(
-        circle at var(--shrimp-focus-x) var(--shrimp-focus-y),
+        ellipse var(--shrimp-focus-radius-x) var(--shrimp-focus-radius-y) at var(--shrimp-focus-x) var(--shrimp-focus-y),
         transparent 0,
-        transparent calc(var(--shrimp-focus-radius) - var(--shrimp-focus-feather)),
-        rgba(0, 0, 0, 0.25) calc(var(--shrimp-focus-radius) - 12px),
-        rgba(0, 0, 0, 0.92) calc(var(--shrimp-focus-radius) + var(--shrimp-focus-feather)),
+        transparent var(--shrimp-focus-inner-stop),
+        rgba(0, 0, 0, 0.25) calc(var(--shrimp-focus-inner-stop) + 3%),
+        rgba(0, 0, 0, 0.92) var(--shrimp-focus-outer-stop),
         rgba(0, 0, 0, 1) 100%
       );
     }
@@ -158,12 +173,12 @@ function ensureOverlay() {
       position: absolute;
       inset: 0;
       background: radial-gradient(
-        circle at var(--shrimp-focus-x) var(--shrimp-focus-y),
+        ellipse var(--shrimp-focus-radius-x) var(--shrimp-focus-radius-y) at var(--shrimp-focus-x) var(--shrimp-focus-y),
         rgba(255, 255, 255, 0) 0,
-        rgba(255, 255, 255, 0) calc(var(--shrimp-focus-radius) - 6px),
-        rgba(255, 255, 255, 0.28) calc(var(--shrimp-focus-radius) + 2px),
-        rgba(255, 255, 255, 0.08) calc(var(--shrimp-focus-radius) + 20px),
-        rgba(255, 255, 255, 0) calc(var(--shrimp-focus-radius) + 36px)
+        rgba(255, 255, 255, 0) 94%,
+        rgba(255, 255, 255, 0.28) 101%,
+        rgba(255, 255, 255, 0.08) 109%,
+        rgba(255, 255, 255, 0) 116%
       );
       mix-blend-mode: screen;
       opacity: 0.9;
@@ -172,7 +187,7 @@ function ensureOverlay() {
     .${OUTSIDE_TEXT_CLASS} {
       color: rgba(136, 214, 154, 0.95) !important;
       -webkit-text-fill-color: rgba(136, 214, 154, 0.95) !important;
-      transition: color 120ms linear, -webkit-text-fill-color 120ms linear;
+      transition: color 260ms ease-out, -webkit-text-fill-color 260ms ease-out;
     }
   `;
 
@@ -223,21 +238,10 @@ function trackPointer() {
 
 function resolvePointerCoordinate() {
   const pointer = lastPointerCoordinate;
-  if (!pointer) {
-    return {
-      x: window.innerWidth / 2,
-      y: window.innerHeight / 2,
-      radius: clampNumber(settings.focusRadius, 40, 1200, SETTINGS_DEFAULTS.focusRadius),
-      feather: clampNumber(settings.feather, 4, 400, SETTINGS_DEFAULTS.feather),
-    };
-  }
+  const rawX = pointer ? pointer.x : window.innerWidth / 2;
+  const rawY = pointer ? pointer.y : window.innerHeight / 2;
 
-  return {
-    x: clampNumber(pointer.x, -100000, 100000, window.innerWidth / 2),
-    y: clampNumber(pointer.y, -100000, 100000, window.innerHeight / 2),
-    radius: clampNumber(settings.focusRadius, 40, 1200, SETTINGS_DEFAULTS.focusRadius),
-    feather: clampNumber(settings.feather, 4, 400, SETTINGS_DEFAULTS.feather),
-  };
+  return resolveFocusGeometry(rawX, rawY);
 }
 
 function resolveCoordinate(coordinate, coordinateSpace) {
@@ -265,11 +269,23 @@ function resolveCoordinate(coordinate, coordinateSpace) {
     }
   }
 
+  return resolveFocusGeometry(x, y);
+}
+
+function resolveFocusGeometry(x, y) {
+  const legacyRadius = clampNumber(settings.focusRadius, 40, 1600, SETTINGS_DEFAULTS.focusRadiusX);
+  const radiusX = clampNumber(settings.focusRadiusX, 40, 1600, legacyRadius);
+  const radiusY = clampNumber(settings.focusRadiusY, 40, 1600, legacyRadius);
+  const maxFeather = Math.max(4, Math.min(radiusX, radiusY) - 2);
+  const offsetX = clampNumber(settings.focusOffsetX, -3000, 3000, SETTINGS_DEFAULTS.focusOffsetX);
+  const offsetY = clampNumber(settings.focusOffsetY, -3000, 3000, SETTINGS_DEFAULTS.focusOffsetY);
+
   return {
-    x,
-    y,
-    radius: clampNumber(settings.focusRadius, 40, 1200, SETTINGS_DEFAULTS.focusRadius),
-    feather: clampNumber(settings.feather, 4, 400, SETTINGS_DEFAULTS.feather),
+    x: clampNumber(x + offsetX, -100000, 100000, window.innerWidth / 2),
+    y: clampNumber(y + offsetY, -100000, 100000, window.innerHeight / 2),
+    radiusX,
+    radiusY,
+    feather: clampNumber(settings.feather, 4, Math.min(600, maxFeather), SETTINGS_DEFAULTS.feather),
   };
 }
 
@@ -280,29 +296,149 @@ function applyCoordinate(coordinate) {
   }
 
   if (!coordinate) {
+    targetCoordinate = null;
+    renderedCoordinate = null;
+    cancelFocusAnimation();
     overlay.classList.remove('shrimp-coordinate-lens--active');
     clearOutsideTextTint();
     return;
   }
 
+  targetCoordinate = {
+    x: coordinate.x,
+    y: coordinate.y,
+    radiusX: coordinate.radiusX,
+    radiusY: coordinate.radiusY,
+    feather: coordinate.feather,
+  };
+
   overlay.classList.add('shrimp-coordinate-lens--active');
+
+  if (!renderedCoordinate) {
+    renderedCoordinate = { ...targetCoordinate };
+    applyOverlayVisualState(overlay, renderedCoordinate);
+    updateOutsideTextTint(renderedCoordinate, performance.now(), true);
+  }
+
+  scheduleFocusAnimation();
+}
+
+function scheduleFocusAnimation() {
+  if (animationFrameId !== null || !targetCoordinate) {
+    return;
+  }
+
+  animationFrameId = window.requestAnimationFrame(stepFocusAnimation);
+}
+
+function stepFocusAnimation(timestamp) {
+  animationFrameId = null;
+  const overlay = ensureOverlay();
+  if (!overlay || !targetCoordinate) {
+    return;
+  }
+
+  if (!renderedCoordinate) {
+    renderedCoordinate = { ...targetCoordinate };
+  }
+
+  const deltaMs = animationLastTimestamp > 0 ? Math.max(0, timestamp - animationLastTimestamp) : 16;
+  animationLastTimestamp = timestamp;
+
+  const transitionMs = clampNumber(settings.transitionMs, 0, 2000, SETTINGS_DEFAULTS.transitionMs);
+  const alpha = transitionMs <= 0 ? 1 : 1 - Math.exp(-deltaMs / transitionMs);
+
+  renderedCoordinate = {
+    x: lerp(renderedCoordinate.x, targetCoordinate.x, alpha),
+    y: lerp(renderedCoordinate.y, targetCoordinate.y, alpha),
+    radiusX: lerp(renderedCoordinate.radiusX, targetCoordinate.radiusX, alpha),
+    radiusY: lerp(renderedCoordinate.radiusY, targetCoordinate.radiusY, alpha),
+    feather: lerp(renderedCoordinate.feather, targetCoordinate.feather, alpha),
+  };
+
+  applyOverlayVisualState(overlay, renderedCoordinate);
+  updateOutsideTextTint(renderedCoordinate, timestamp, false);
+
+  if (!isCoordinateSettled(renderedCoordinate, targetCoordinate)) {
+    scheduleFocusAnimation();
+    return;
+  }
+
+  renderedCoordinate = { ...targetCoordinate };
+  applyOverlayVisualState(overlay, renderedCoordinate);
+  updateOutsideTextTint(renderedCoordinate, timestamp, true);
+}
+
+function cancelFocusAnimation() {
+  if (animationFrameId !== null) {
+    window.cancelAnimationFrame(animationFrameId);
+    animationFrameId = null;
+  }
+
+  animationLastTimestamp = 0;
+}
+
+function applyOverlayVisualState(overlay, coordinate) {
+  const radiusX = clampNumber(coordinate.radiusX, 40, 1600, SETTINGS_DEFAULTS.focusRadiusX);
+  const radiusY = clampNumber(coordinate.radiusY, 40, 1600, SETTINGS_DEFAULTS.focusRadiusY);
+  const maxFeather = Math.max(4, Math.min(radiusX, radiusY) - 2);
+  const feather = clampNumber(coordinate.feather, 4, Math.min(600, maxFeather), SETTINGS_DEFAULTS.feather);
+  const stops = resolveFeatherStops(radiusX, radiusY, feather);
+
   overlay.style.setProperty('--shrimp-focus-x', `${Math.round(coordinate.x)}px`);
   overlay.style.setProperty('--shrimp-focus-y', `${Math.round(coordinate.y)}px`);
-  overlay.style.setProperty('--shrimp-focus-radius', `${Math.round(coordinate.radius)}px`);
-  overlay.style.setProperty('--shrimp-focus-feather', `${Math.round(coordinate.feather)}px`);
+  overlay.style.setProperty('--shrimp-focus-radius-x', `${Math.round(radiusX)}px`);
+  overlay.style.setProperty('--shrimp-focus-radius-y', `${Math.round(radiusY)}px`);
+  overlay.style.setProperty('--shrimp-focus-inner-stop', `${stops.inner.toFixed(2)}%`);
+  overlay.style.setProperty('--shrimp-focus-outer-stop', `${stops.outer.toFixed(2)}%`);
   overlay.style.setProperty('--shrimp-brightness', String(clampNumber(settings.brightness, 0.5, 1.2, SETTINGS_DEFAULTS.brightness)));
   overlay.style.setProperty('--shrimp-contrast', String(clampNumber(settings.contrast, 0.5, 1.2, SETTINGS_DEFAULTS.contrast)));
   overlay.style.setProperty('--shrimp-saturate', String(clampNumber(settings.saturate, 0.5, 1.5, SETTINGS_DEFAULTS.saturate)));
   overlay.style.setProperty('--shrimp-tint', String(clampNumber(settings.overlayTint, 0, 0.35, SETTINGS_DEFAULTS.overlayTint)));
-  updateOutsideTextTint(coordinate);
 }
 
-function updateOutsideTextTint(coordinate) {
+function resolveFeatherStops(radiusX, radiusY, feather) {
+  const minRadius = Math.max(4, Math.min(radiusX, radiusY));
+  const innerRaw = ((minRadius - feather) / minRadius) * 100;
+  const outerRaw = ((minRadius + feather) / minRadius) * 100;
+
+  const inner = Math.max(0, Math.min(98, innerRaw));
+  const outer = Math.max(inner + 0.5, Math.min(140, outerRaw));
+
+  return { inner, outer };
+}
+
+function isCoordinateSettled(current, target) {
+  if (!current || !target) {
+    return true;
+  }
+
+  const positionDelta =
+    Math.abs(current.x - target.x) +
+    Math.abs(current.y - target.y) +
+    Math.abs(current.radiusX - target.radiusX) +
+    Math.abs(current.radiusY - target.radiusY) +
+    Math.abs(current.feather - target.feather);
+
+  return positionDelta < 0.9;
+}
+
+function lerp(current, target, factor) {
+  return current + (target - current) * factor;
+}
+
+function updateOutsideTextTint(coordinate, timestamp, force) {
   if (!document.body || !coordinate) {
     clearOutsideTextTint();
     return;
   }
 
+  const now = typeof timestamp === 'number' ? timestamp : performance.now();
+  if (!force && now - lastTextTintUpdateTimestamp < TEXT_TINT_UPDATE_INTERVAL_MS) {
+    return;
+  }
+
+  lastTextTintUpdateTimestamp = now;
   const nextTinted = new Set();
   const textElements = collectTintCandidates(MAX_TINTED_TEXT_ELEMENTS);
 
@@ -344,6 +480,7 @@ function clearOutsideTextTint() {
   }
 
   outsideTintedElements = new Set();
+  lastTextTintUpdateTimestamp = 0;
 }
 
 function collectTintCandidates(limit) {
@@ -401,9 +538,35 @@ function isElementOutsideFocus(rect, coordinate) {
   const nearestY = Math.max(rect.top, Math.min(coordinate.y, rect.bottom));
   const dx = nearestX - coordinate.x;
   const dy = nearestY - coordinate.y;
-  const radius = Math.max(4, coordinate.radius);
+  const radiusX = Math.max(4, coordinate.radiusX);
+  const radiusY = Math.max(4, coordinate.radiusY);
+  const normalizedDistance = (dx * dx) / (radiusX * radiusX) + (dy * dy) / (radiusY * radiusY);
 
-  return dx * dx + dy * dy > radius * radius;
+  return normalizedDistance > 1;
+}
+
+function normalizeSettings(rawSettings) {
+  const source = rawSettings && typeof rawSettings === 'object' ? rawSettings : {};
+  const legacyRadius = clampNumber(source.focusRadius, 40, 1600, SETTINGS_DEFAULTS.focusRadiusX);
+  const focusRadiusX = clampNumber(source.focusRadiusX, 40, 1600, legacyRadius);
+  const focusRadiusY = clampNumber(source.focusRadiusY, 40, 1600, legacyRadius);
+  const maxFeather = Math.max(4, Math.min(focusRadiusX, focusRadiusY) - 2);
+
+  return {
+    ...SETTINGS_DEFAULTS,
+    ...source,
+    focusRadiusX,
+    focusRadiusY,
+    focusOffsetX: clampNumber(source.focusOffsetX, -3000, 3000, SETTINGS_DEFAULTS.focusOffsetX),
+    focusOffsetY: clampNumber(source.focusOffsetY, -3000, 3000, SETTINGS_DEFAULTS.focusOffsetY),
+    feather: clampNumber(source.feather, 4, Math.min(600, maxFeather), SETTINGS_DEFAULTS.feather),
+    transitionMs: clampNumber(source.transitionMs, 0, 2000, SETTINGS_DEFAULTS.transitionMs),
+    brightness: clampNumber(source.brightness, 0.5, 1.2, SETTINGS_DEFAULTS.brightness),
+    contrast: clampNumber(source.contrast, 0.5, 1.2, SETTINGS_DEFAULTS.contrast),
+    saturate: clampNumber(source.saturate, 0.5, 1.5, SETTINGS_DEFAULTS.saturate),
+    overlayTint: clampNumber(source.overlayTint, 0, 0.35, SETTINGS_DEFAULTS.overlayTint),
+    pollInterval: clampNumber(source.pollInterval, 300, 10000, SETTINGS_DEFAULTS.pollInterval),
+  };
 }
 
 function clampNumber(value, min, max, fallback) {
