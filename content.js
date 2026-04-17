@@ -183,6 +183,7 @@ async function requestCoordinate() {
     });
 
     if (!response?.ok) {
+      applyCoordinate(resolvePointerCoordinate());
       return;
     }
 
@@ -192,6 +193,7 @@ async function requestCoordinate() {
     applyCoordinate(coordinate);
   } catch (error) {
     console.warn('Coordinate Dimming Lens request failed:', error);
+    applyCoordinate(resolvePointerCoordinate());
   }
 }
 
