@@ -18,8 +18,8 @@
         <p class="mode-guide__title">自动模式预设</p>
         <ul class="mode-guide__list">
           <li><strong>Focused Reading</strong>：默认模式，焦点外更暗。</li>
-          <li><strong>Scanning Mode</strong>：光标持续快速移动 1200ms 后触发，焦点外更亮。</li>
-          <li><strong>Fatigue State</strong>：长时低活动且慢速触发，变化更慢且焦点外更暗，快速移动退出。</li>
+          <li><strong>Scanning Mode</strong>：默认在光标持续快速移动 1200ms 后触发（可调），焦点外更亮。</li>
+          <li><strong>Fatigue State</strong>：默认在长时低活动且慢速时触发（可调），变化更慢且焦点外更暗。</li>
         </ul>
       </section>
 
@@ -102,6 +102,188 @@
             <input id="saturate" type="number" min="0.5" max="1.5" step="0.01" />
           </label>
         </div>
+
+        <section class="subpanel" aria-label="模式参数">
+          <p class="subpanel__title">模式参数（可调）</p>
+          <p class="subpanel__hint">三个状态的视觉参数都可手动调节，保存后立即生效。</p>
+
+          <div class="preset-block">
+            <h2>Focused Reading</h2>
+            <div class="grid three-up">
+              <label>
+                亮度倍率
+                <input id="focusedBrightnessScale" type="number" min="0.4" max="1.4" step="0.01" />
+              </label>
+
+              <label>
+                对比倍率
+                <input id="focusedContrastScale" type="number" min="0.4" max="1.4" step="0.01" />
+              </label>
+
+              <label>
+                饱和倍率
+                <input id="focusedSaturateScale" type="number" min="0.4" max="1.8" step="0.01" />
+              </label>
+
+              <label>
+                暗层倍率
+                <input id="focusedTintScale" type="number" min="0.2" max="2" step="0.01" />
+              </label>
+
+              <label>
+                外围文字倍率
+                <input id="focusedTextOutsideScale" type="number" min="0.2" max="2" step="0.01" />
+              </label>
+
+              <label>
+                过渡倍率
+                <input id="focusedTransitionScale" type="number" min="0.2" max="8" step="0.01" />
+              </label>
+            </div>
+          </div>
+
+          <div class="preset-block">
+            <h2>Scanning Mode</h2>
+            <div class="grid three-up">
+              <label>
+                亮度倍率
+                <input id="scanningBrightnessScale" type="number" min="0.4" max="1.4" step="0.01" />
+              </label>
+
+              <label>
+                对比倍率
+                <input id="scanningContrastScale" type="number" min="0.4" max="1.4" step="0.01" />
+              </label>
+
+              <label>
+                饱和倍率
+                <input id="scanningSaturateScale" type="number" min="0.4" max="1.8" step="0.01" />
+              </label>
+
+              <label>
+                暗层倍率
+                <input id="scanningTintScale" type="number" min="0.2" max="2" step="0.01" />
+              </label>
+
+              <label>
+                外围文字倍率
+                <input id="scanningTextOutsideScale" type="number" min="0.2" max="2" step="0.01" />
+              </label>
+
+              <label>
+                过渡倍率
+                <input id="scanningTransitionScale" type="number" min="0.2" max="8" step="0.01" />
+              </label>
+            </div>
+          </div>
+
+          <div class="preset-block">
+            <h2>Fatigue State</h2>
+            <div class="grid three-up">
+              <label>
+                亮度倍率
+                <input id="fatigueBrightnessScale" type="number" min="0.4" max="1.4" step="0.01" />
+              </label>
+
+              <label>
+                对比倍率
+                <input id="fatigueContrastScale" type="number" min="0.4" max="1.4" step="0.01" />
+              </label>
+
+              <label>
+                饱和倍率
+                <input id="fatigueSaturateScale" type="number" min="0.4" max="1.8" step="0.01" />
+              </label>
+
+              <label>
+                暗层倍率
+                <input id="fatigueTintScale" type="number" min="0.2" max="2" step="0.01" />
+              </label>
+
+              <label>
+                外围文字倍率
+                <input id="fatigueTextOutsideScale" type="number" min="0.2" max="2" step="0.01" />
+              </label>
+
+              <label>
+                过渡倍率
+                <input id="fatigueTransitionScale" type="number" min="0.2" max="8" step="0.01" />
+              </label>
+            </div>
+          </div>
+        </section>
+
+        <section class="subpanel" aria-label="触发条件">
+          <p class="subpanel__title">模式切换触发条件（可调）</p>
+          <p class="subpanel__hint">可以按你的手感调整速度阈值、触发时长和退出条件。</p>
+
+          <div class="grid three-up">
+            <label>
+              移动判定最小位移（px）
+              <input id="modeMovementEpsilonPx" type="number" min="0.1" max="20" step="0.1" />
+            </label>
+
+            <label>
+              快速速度阈值（px/ms）
+              <input id="modeFastSpeedPxPerMs" type="number" min="0.05" max="4" step="0.01" />
+            </label>
+
+            <label>
+              快速重置阈值（px/ms）
+              <input id="modeFastResetSpeedPxPerMs" type="number" min="0.01" max="3" step="0.01" />
+            </label>
+
+            <label>
+              Scanning 触发时长（ms）
+              <input id="modeScanTriggerMs" type="number" min="200" max="8000" step="10" />
+            </label>
+
+            <label>
+              Scanning 退出速度（px/ms）
+              <input id="modeScanExitSpeedPxPerMs" type="number" min="0.01" max="3" step="0.01" />
+            </label>
+
+            <label>
+              Scanning 退出保持（ms）
+              <input id="modeScanExitHoldMs" type="number" min="80" max="3000" step="10" />
+            </label>
+
+            <label>
+              Fatigue 静止判定（ms）
+              <input id="modeFatigueIdleMs" type="number" min="1000" max="120000" step="100" />
+            </label>
+
+            <label>
+              Fatigue 慢速阈值（px/ms）
+              <input id="modeSlowSpeedPxPerMs" type="number" min="0.001" max="1" step="0.001" />
+            </label>
+
+            <label>
+              慢速重置阈值（px/ms）
+              <input id="modeSlowResetSpeedPxPerMs" type="number" min="0.001" max="2" step="0.001" />
+            </label>
+
+            <label>
+              Fatigue 触发保持（ms）
+              <input id="modeFatigueTriggerMs" type="number" min="200" max="12000" step="50" />
+            </label>
+
+            <label>
+              Fatigue 退出速度（px/ms）
+              <input id="modeFatigueExitSpeedPxPerMs" type="number" min="0.05" max="3" step="0.01" />
+            </label>
+
+            <label>
+              速度衰减时间常数（ms）
+              <input id="modeSpeedDecayTauMs" type="number" min="60" max="5000" step="10" />
+            </label>
+
+            <label>
+              空闲衰减延迟（ms）
+              <input id="modeDecayAfterIdleMs" type="number" min="0" max="2000" step="10" />
+            </label>
+          </div>
+        </section>
 
         <label class="toggle">
           <input id="enabled" type="checkbox" />

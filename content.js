@@ -13,6 +13,37 @@ const SETTINGS_DEFAULTS = {
   contrast: 0.88,
   saturate: 0.92,
   overlayTint: 0.08,
+  focusedBrightnessScale: 0.92,
+  focusedContrastScale: 0.94,
+  focusedSaturateScale: 0.94,
+  focusedTintScale: 1.26,
+  focusedTextOutsideScale: 1.14,
+  focusedTransitionScale: 1,
+  scanningBrightnessScale: 1.06,
+  scanningContrastScale: 1.04,
+  scanningSaturateScale: 1.03,
+  scanningTintScale: 0.54,
+  scanningTextOutsideScale: 0.62,
+  scanningTransitionScale: 0.68,
+  fatigueBrightnessScale: 0.78,
+  fatigueContrastScale: 0.84,
+  fatigueSaturateScale: 0.82,
+  fatigueTintScale: 1.55,
+  fatigueTextOutsideScale: 1.42,
+  fatigueTransitionScale: 4,
+  modeMovementEpsilonPx: 1.2,
+  modeFastSpeedPxPerMs: 0.88,
+  modeFastResetSpeedPxPerMs: 0.5,
+  modeScanTriggerMs: 1200,
+  modeScanExitSpeedPxPerMs: 0.42,
+  modeScanExitHoldMs: 360,
+  modeFatigueIdleMs: 7000,
+  modeSlowSpeedPxPerMs: 0.08,
+  modeSlowResetSpeedPxPerMs: 0.22,
+  modeFatigueTriggerMs: 1600,
+  modeFatigueExitSpeedPxPerMs: 0.36,
+  modeSpeedDecayTauMs: 360,
+  modeDecayAfterIdleMs: 100,
 };
 
 const OUTSIDE_TEXT_CLASS = 'shrimp-coordinate-lens__outside-text';
@@ -25,46 +56,31 @@ const READING_MODES = Object.freeze({
   SCANNING: 'scanning-mode',
   FATIGUE: 'fatigue-state',
 });
-const READING_MODE_PRESETS = Object.freeze({
+const MODE_PRESET_FIELD_MAP = Object.freeze({
   [READING_MODES.FOCUSED]: {
-    brightnessScale: 0.92,
-    contrastScale: 0.94,
-    saturateScale: 0.94,
-    tintScale: 1.26,
-    textOutsideScale: 1.14,
-    transitionScale: 1,
+    brightnessScale: 'focusedBrightnessScale',
+    contrastScale: 'focusedContrastScale',
+    saturateScale: 'focusedSaturateScale',
+    tintScale: 'focusedTintScale',
+    textOutsideScale: 'focusedTextOutsideScale',
+    transitionScale: 'focusedTransitionScale',
   },
   [READING_MODES.SCANNING]: {
-    brightnessScale: 1.06,
-    contrastScale: 1.04,
-    saturateScale: 1.03,
-    tintScale: 0.54,
-    textOutsideScale: 0.62,
-    transitionScale: 0.68,
+    brightnessScale: 'scanningBrightnessScale',
+    contrastScale: 'scanningContrastScale',
+    saturateScale: 'scanningSaturateScale',
+    tintScale: 'scanningTintScale',
+    textOutsideScale: 'scanningTextOutsideScale',
+    transitionScale: 'scanningTransitionScale',
   },
   [READING_MODES.FATIGUE]: {
-    brightnessScale: 0.78,
-    contrastScale: 0.84,
-    saturateScale: 0.82,
-    tintScale: 1.55,
-    textOutsideScale: 1.42,
-    transitionScale: 4,
+    brightnessScale: 'fatigueBrightnessScale',
+    contrastScale: 'fatigueContrastScale',
+    saturateScale: 'fatigueSaturateScale',
+    tintScale: 'fatigueTintScale',
+    textOutsideScale: 'fatigueTextOutsideScale',
+    transitionScale: 'fatigueTransitionScale',
   },
-});
-const POINTER_MODE_THRESHOLDS = Object.freeze({
-  movementEpsilonPx: 1.2,
-  fastSpeedPxPerMs: 0.88,
-  fastResetSpeedPxPerMs: 0.5,
-  scanTriggerMs: 1200,
-  scanExitSpeedPxPerMs: 0.42,
-  scanExitHoldMs: 360,
-  fatigueIdleMs: 7000,
-  slowSpeedPxPerMs: 0.08,
-  slowResetSpeedPxPerMs: 0.22,
-  fatigueTriggerMs: 1600,
-  fatigueExitSpeedPxPerMs: 0.36,
-  speedDecayTauMs: 360,
-  decayAfterIdleMs: 100,
 });
 
 let settings = { ...SETTINGS_DEFAULTS };
@@ -79,6 +95,7 @@ let animationLastTimestamp = 0;
 let lastTextTintUpdateTimestamp = 0;
 let activeReadingMode = READING_MODES.FOCUSED;
 let pointerMotionState = createPointerMotionState();
+let modeConfig = createModeConfig(SETTINGS_DEFAULTS);
 
 initialize().catch((error) => {
   console.error('Coordinate Dimming Lens initialization failed:', error);
@@ -86,6 +103,7 @@ initialize().catch((error) => {
 
 async function initialize() {
   settings = await loadSettings();
+  modeConfig = createModeConfig(settings);
   ensureOverlay();
   setReadingMode(READING_MODES.FOCUSED, true);
   trackPointer();
@@ -97,6 +115,7 @@ async function initialize() {
     chrome.runtime.onMessage.addListener((message) => {
       if (message?.type === 'lens-settings-updated') {
         settings = normalizeSettings({ ...settings, ...message.settings });
+        modeConfig = createModeConfig(settings);
         refreshPolling();
       }
     });
@@ -131,6 +150,7 @@ function handleStorageChange(changes, areaName) {
   }
 
   settings = normalizeSettings({ ...settings, ...updated });
+  modeConfig = createModeConfig(settings);
   refreshPolling();
 }
 
@@ -635,6 +655,200 @@ function smoothStep(value) {
   return value * value * (3 - 2 * value);
 }
 
+function createModeConfig(sourceSettings) {
+  const modeSettings = normalizeModeSettings(sourceSettings);
+
+  return {
+    presets: {
+      [READING_MODES.FOCUSED]: resolveModePreset(modeSettings, READING_MODES.FOCUSED),
+      [READING_MODES.SCANNING]: resolveModePreset(modeSettings, READING_MODES.SCANNING),
+      [READING_MODES.FATIGUE]: resolveModePreset(modeSettings, READING_MODES.FATIGUE),
+    },
+    thresholds: {
+      movementEpsilonPx: modeSettings.modeMovementEpsilonPx,
+      fastSpeedPxPerMs: modeSettings.modeFastSpeedPxPerMs,
+      fastResetSpeedPxPerMs: modeSettings.modeFastResetSpeedPxPerMs,
+      scanTriggerMs: modeSettings.modeScanTriggerMs,
+      scanExitSpeedPxPerMs: modeSettings.modeScanExitSpeedPxPerMs,
+      scanExitHoldMs: modeSettings.modeScanExitHoldMs,
+      fatigueIdleMs: modeSettings.modeFatigueIdleMs,
+      slowSpeedPxPerMs: modeSettings.modeSlowSpeedPxPerMs,
+      slowResetSpeedPxPerMs: modeSettings.modeSlowResetSpeedPxPerMs,
+      fatigueTriggerMs: modeSettings.modeFatigueTriggerMs,
+      fatigueExitSpeedPxPerMs: modeSettings.modeFatigueExitSpeedPxPerMs,
+      speedDecayTauMs: modeSettings.modeSpeedDecayTauMs,
+      decayAfterIdleMs: modeSettings.modeDecayAfterIdleMs,
+    },
+  };
+}
+
+function resolveModePreset(modeSettings, modeName) {
+  const fieldMap = MODE_PRESET_FIELD_MAP[modeName] ?? MODE_PRESET_FIELD_MAP[READING_MODES.FOCUSED];
+  return {
+    brightnessScale: modeSettings[fieldMap.brightnessScale],
+    contrastScale: modeSettings[fieldMap.contrastScale],
+    saturateScale: modeSettings[fieldMap.saturateScale],
+    tintScale: modeSettings[fieldMap.tintScale],
+    textOutsideScale: modeSettings[fieldMap.textOutsideScale],
+    transitionScale: modeSettings[fieldMap.transitionScale],
+  };
+}
+
+function normalizeModeSettings(rawSettings) {
+  const source = rawSettings && typeof rawSettings === 'object' ? rawSettings : {};
+  const fastSpeed = clampNumber(source.modeFastSpeedPxPerMs, 0.05, 4, SETTINGS_DEFAULTS.modeFastSpeedPxPerMs);
+  const slowSpeed = clampNumber(source.modeSlowSpeedPxPerMs, 0.001, 1, SETTINGS_DEFAULTS.modeSlowSpeedPxPerMs);
+
+  return {
+    focusedBrightnessScale: clampNumber(
+      source.focusedBrightnessScale,
+      0.4,
+      1.4,
+      SETTINGS_DEFAULTS.focusedBrightnessScale
+    ),
+    focusedContrastScale: clampNumber(
+      source.focusedContrastScale,
+      0.4,
+      1.4,
+      SETTINGS_DEFAULTS.focusedContrastScale
+    ),
+    focusedSaturateScale: clampNumber(
+      source.focusedSaturateScale,
+      0.4,
+      1.8,
+      SETTINGS_DEFAULTS.focusedSaturateScale
+    ),
+    focusedTintScale: clampNumber(source.focusedTintScale, 0.2, 2, SETTINGS_DEFAULTS.focusedTintScale),
+    focusedTextOutsideScale: clampNumber(
+      source.focusedTextOutsideScale,
+      0.2,
+      2,
+      SETTINGS_DEFAULTS.focusedTextOutsideScale
+    ),
+    focusedTransitionScale: clampNumber(
+      source.focusedTransitionScale,
+      0.2,
+      8,
+      SETTINGS_DEFAULTS.focusedTransitionScale
+    ),
+    scanningBrightnessScale: clampNumber(
+      source.scanningBrightnessScale,
+      0.4,
+      1.4,
+      SETTINGS_DEFAULTS.scanningBrightnessScale
+    ),
+    scanningContrastScale: clampNumber(
+      source.scanningContrastScale,
+      0.4,
+      1.4,
+      SETTINGS_DEFAULTS.scanningContrastScale
+    ),
+    scanningSaturateScale: clampNumber(
+      source.scanningSaturateScale,
+      0.4,
+      1.8,
+      SETTINGS_DEFAULTS.scanningSaturateScale
+    ),
+    scanningTintScale: clampNumber(source.scanningTintScale, 0.2, 2, SETTINGS_DEFAULTS.scanningTintScale),
+    scanningTextOutsideScale: clampNumber(
+      source.scanningTextOutsideScale,
+      0.2,
+      2,
+      SETTINGS_DEFAULTS.scanningTextOutsideScale
+    ),
+    scanningTransitionScale: clampNumber(
+      source.scanningTransitionScale,
+      0.2,
+      8,
+      SETTINGS_DEFAULTS.scanningTransitionScale
+    ),
+    fatigueBrightnessScale: clampNumber(
+      source.fatigueBrightnessScale,
+      0.4,
+      1.4,
+      SETTINGS_DEFAULTS.fatigueBrightnessScale
+    ),
+    fatigueContrastScale: clampNumber(
+      source.fatigueContrastScale,
+      0.4,
+      1.4,
+      SETTINGS_DEFAULTS.fatigueContrastScale
+    ),
+    fatigueSaturateScale: clampNumber(
+      source.fatigueSaturateScale,
+      0.4,
+      1.8,
+      SETTINGS_DEFAULTS.fatigueSaturateScale
+    ),
+    fatigueTintScale: clampNumber(source.fatigueTintScale, 0.2, 2, SETTINGS_DEFAULTS.fatigueTintScale),
+    fatigueTextOutsideScale: clampNumber(
+      source.fatigueTextOutsideScale,
+      0.2,
+      2,
+      SETTINGS_DEFAULTS.fatigueTextOutsideScale
+    ),
+    fatigueTransitionScale: clampNumber(
+      source.fatigueTransitionScale,
+      0.2,
+      8,
+      SETTINGS_DEFAULTS.fatigueTransitionScale
+    ),
+    modeMovementEpsilonPx: clampNumber(
+      source.modeMovementEpsilonPx,
+      0.1,
+      20,
+      SETTINGS_DEFAULTS.modeMovementEpsilonPx
+    ),
+    modeFastSpeedPxPerMs: fastSpeed,
+    modeFastResetSpeedPxPerMs: clampNumber(
+      source.modeFastResetSpeedPxPerMs,
+      0.01,
+      fastSpeed,
+      Math.min(fastSpeed, SETTINGS_DEFAULTS.modeFastResetSpeedPxPerMs)
+    ),
+    modeScanTriggerMs: clampNumber(source.modeScanTriggerMs, 200, 8000, SETTINGS_DEFAULTS.modeScanTriggerMs),
+    modeScanExitSpeedPxPerMs: clampNumber(
+      source.modeScanExitSpeedPxPerMs,
+      0.01,
+      3,
+      SETTINGS_DEFAULTS.modeScanExitSpeedPxPerMs
+    ),
+    modeScanExitHoldMs: clampNumber(source.modeScanExitHoldMs, 80, 3000, SETTINGS_DEFAULTS.modeScanExitHoldMs),
+    modeFatigueIdleMs: clampNumber(source.modeFatigueIdleMs, 1000, 120000, SETTINGS_DEFAULTS.modeFatigueIdleMs),
+    modeSlowSpeedPxPerMs: slowSpeed,
+    modeSlowResetSpeedPxPerMs: clampNumber(
+      source.modeSlowResetSpeedPxPerMs,
+      slowSpeed,
+      2,
+      Math.max(slowSpeed, SETTINGS_DEFAULTS.modeSlowResetSpeedPxPerMs)
+    ),
+    modeFatigueTriggerMs: clampNumber(
+      source.modeFatigueTriggerMs,
+      200,
+      12000,
+      SETTINGS_DEFAULTS.modeFatigueTriggerMs
+    ),
+    modeFatigueExitSpeedPxPerMs: clampNumber(
+      source.modeFatigueExitSpeedPxPerMs,
+      0.05,
+      3,
+      SETTINGS_DEFAULTS.modeFatigueExitSpeedPxPerMs
+    ),
+    modeSpeedDecayTauMs: clampNumber(
+      source.modeSpeedDecayTauMs,
+      60,
+      5000,
+      SETTINGS_DEFAULTS.modeSpeedDecayTauMs
+    ),
+    modeDecayAfterIdleMs: clampNumber(
+      source.modeDecayAfterIdleMs,
+      0,
+      2000,
+      SETTINGS_DEFAULTS.modeDecayAfterIdleMs
+    ),
+  };
+}
+
 function createPointerMotionState() {
   const now = performance.now();
   return {
@@ -651,6 +865,8 @@ function createPointerMotionState() {
 }
 
 function updatePointerMotion(x, y, timestamp) {
+  const thresholds = modeConfig.thresholds;
+
   if (pointerMotionState.lastSampleX === null || pointerMotionState.lastSampleY === null) {
     pointerMotionState.lastSampleX = x;
     pointerMotionState.lastSampleY = y;
@@ -671,7 +887,7 @@ function updatePointerMotion(x, y, timestamp) {
   pointerMotionState.smoothedSpeed =
     pointerMotionState.smoothedSpeed * (1 - smoothingFactor) + instantSpeed * smoothingFactor;
 
-  if (distance >= POINTER_MODE_THRESHOLDS.movementEpsilonPx) {
+  if (distance >= thresholds.movementEpsilonPx) {
     pointerMotionState.lastMovementTimestamp = timestamp;
   }
 
@@ -682,19 +898,20 @@ function updatePointerMotion(x, y, timestamp) {
 }
 
 function updateReadingMode(timestamp) {
+  const thresholds = modeConfig.thresholds;
   const now = typeof timestamp === 'number' ? timestamp : performance.now();
   decayPointerSpeed(now);
 
   const speed = Math.max(0, pointerMotionState.smoothedSpeed);
   const idleMs = Math.max(0, now - pointerMotionState.lastMovementTimestamp);
-  const idleLongEnough = idleMs >= POINTER_MODE_THRESHOLDS.fatigueIdleMs;
-  const slowEnough = speed <= POINTER_MODE_THRESHOLDS.slowSpeedPxPerMs;
+  const idleLongEnough = idleMs >= thresholds.fatigueIdleMs;
+  const slowEnough = speed <= thresholds.slowSpeedPxPerMs;
 
-  if (speed >= POINTER_MODE_THRESHOLDS.fastSpeedPxPerMs) {
+  if (speed >= thresholds.fastSpeedPxPerMs) {
     if (!pointerMotionState.fastStartTimestamp) {
       pointerMotionState.fastStartTimestamp = now;
     }
-  } else if (speed <= POINTER_MODE_THRESHOLDS.fastResetSpeedPxPerMs) {
+  } else if (speed <= thresholds.fastResetSpeedPxPerMs) {
     pointerMotionState.fastStartTimestamp = 0;
   }
 
@@ -702,11 +919,11 @@ function updateReadingMode(timestamp) {
     if (!pointerMotionState.slowStartTimestamp) {
       pointerMotionState.slowStartTimestamp = now;
     }
-  } else if (!idleLongEnough || speed >= POINTER_MODE_THRESHOLDS.slowResetSpeedPxPerMs) {
+  } else if (!idleLongEnough || speed >= thresholds.slowResetSpeedPxPerMs) {
     pointerMotionState.slowStartTimestamp = 0;
   }
 
-  if (activeReadingMode === READING_MODES.FATIGUE && speed >= POINTER_MODE_THRESHOLDS.fatigueExitSpeedPxPerMs) {
+  if (activeReadingMode === READING_MODES.FATIGUE && speed >= thresholds.fatigueExitSpeedPxPerMs) {
     setReadingMode(READING_MODES.FOCUSED);
     pointerMotionState.slowStartTimestamp = 0;
     return;
@@ -715,7 +932,7 @@ function updateReadingMode(timestamp) {
   if (
     activeReadingMode !== READING_MODES.SCANNING &&
     pointerMotionState.fastStartTimestamp > 0 &&
-    now - pointerMotionState.fastStartTimestamp >= POINTER_MODE_THRESHOLDS.scanTriggerMs
+    now - pointerMotionState.fastStartTimestamp >= thresholds.scanTriggerMs
   ) {
     setReadingMode(READING_MODES.SCANNING);
     pointerMotionState.scanExitStartTimestamp = 0;
@@ -724,10 +941,10 @@ function updateReadingMode(timestamp) {
   }
 
   if (activeReadingMode === READING_MODES.SCANNING) {
-    if (speed <= POINTER_MODE_THRESHOLDS.scanExitSpeedPxPerMs) {
+    if (speed <= thresholds.scanExitSpeedPxPerMs) {
       if (!pointerMotionState.scanExitStartTimestamp) {
         pointerMotionState.scanExitStartTimestamp = now;
-      } else if (now - pointerMotionState.scanExitStartTimestamp >= POINTER_MODE_THRESHOLDS.scanExitHoldMs) {
+      } else if (now - pointerMotionState.scanExitStartTimestamp >= thresholds.scanExitHoldMs) {
         setReadingMode(READING_MODES.FOCUSED);
         pointerMotionState.scanExitStartTimestamp = 0;
       }
@@ -740,7 +957,7 @@ function updateReadingMode(timestamp) {
   if (
     activeReadingMode !== READING_MODES.FATIGUE &&
     pointerMotionState.slowStartTimestamp > 0 &&
-    now - pointerMotionState.slowStartTimestamp >= POINTER_MODE_THRESHOLDS.fatigueTriggerMs
+    now - pointerMotionState.slowStartTimestamp >= thresholds.fatigueTriggerMs
   ) {
     setReadingMode(READING_MODES.FATIGUE);
     pointerMotionState.fastStartTimestamp = 0;
@@ -748,6 +965,7 @@ function updateReadingMode(timestamp) {
 }
 
 function decayPointerSpeed(now) {
+  const thresholds = modeConfig.thresholds;
   const idleSinceSample = now - pointerMotionState.lastSampleTimestamp;
   const decayDelta = now - pointerMotionState.lastDecayTimestamp;
 
@@ -756,16 +974,16 @@ function decayPointerSpeed(now) {
   }
 
   pointerMotionState.lastDecayTimestamp = now;
-  if (idleSinceSample <= POINTER_MODE_THRESHOLDS.decayAfterIdleMs || pointerMotionState.smoothedSpeed <= 0) {
+  if (idleSinceSample <= thresholds.decayAfterIdleMs || pointerMotionState.smoothedSpeed <= 0) {
     return;
   }
 
-  const decayFactor = Math.exp(-decayDelta / POINTER_MODE_THRESHOLDS.speedDecayTauMs);
+  const decayFactor = Math.exp(-decayDelta / thresholds.speedDecayTauMs);
   pointerMotionState.smoothedSpeed *= decayFactor;
 }
 
 function setReadingMode(nextMode, force = false) {
-  const targetMode = READING_MODE_PRESETS[nextMode] ? nextMode : READING_MODES.FOCUSED;
+  const targetMode = modeConfig.presets[nextMode] ? nextMode : READING_MODES.FOCUSED;
   if (!force && activeReadingMode === targetMode) {
     return;
   }
@@ -779,7 +997,7 @@ function setReadingMode(nextMode, force = false) {
 }
 
 function resolveActiveModePreset() {
-  return READING_MODE_PRESETS[activeReadingMode] ?? READING_MODE_PRESETS[READING_MODES.FOCUSED];
+  return modeConfig.presets[activeReadingMode] ?? modeConfig.presets[READING_MODES.FOCUSED];
 }
 
 function resolveModeAdjustedVisualState() {
@@ -824,10 +1042,12 @@ function normalizeSettings(rawSettings) {
   const focusRadiusX = clampNumber(source.focusRadiusX, 40, 1600, legacyRadius);
   const focusRadiusY = clampNumber(source.focusRadiusY, 40, 1600, legacyRadius);
   const maxFeather = Math.max(4, Math.min(focusRadiusX, focusRadiusY) - 2);
+  const modeSettings = normalizeModeSettings(source);
 
   return {
     ...SETTINGS_DEFAULTS,
     ...source,
+    ...modeSettings,
     focusRadiusX,
     focusRadiusY,
     focusOffsetX: clampNumber(source.focusOffsetX, -3000, 3000, SETTINGS_DEFAULTS.focusOffsetX),
