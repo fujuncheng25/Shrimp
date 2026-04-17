@@ -36,6 +36,34 @@ body {
   margin-bottom: 14px;
 }
 
+.mode-guide {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(18, 71, 77, 0.14);
+  background: rgba(255, 255, 255, 0.64);
+}
+
+.mode-guide__title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--accent-strong);
+}
+
+.mode-guide__list {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.mode-guide__list li + li {
+  margin-top: 4px;
+}
+
 .eyebrow {
   margin: 0 0 8px;
   font-size: 12px;

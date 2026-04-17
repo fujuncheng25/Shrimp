@@ -20,6 +20,52 @@ const MAX_TINTED_TEXT_ELEMENTS = 2200;
 const TEXT_TINT_UPDATE_INTERVAL_MS = 80;
 const TEXT_TINT_MIN_TRANSITION_MS = 220;
 const EXCLUDED_TINT_TAGS = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEXTAREA', 'INPUT', 'SELECT', 'OPTION']);
+const READING_MODES = Object.freeze({
+  FOCUSED: 'focused-reading',
+  SCANNING: 'scanning-mode',
+  FATIGUE: 'fatigue-state',
+});
+const READING_MODE_PRESETS = Object.freeze({
+  [READING_MODES.FOCUSED]: {
+    brightnessScale: 0.92,
+    contrastScale: 0.94,
+    saturateScale: 0.94,
+    tintScale: 1.26,
+    textOutsideScale: 1.14,
+    transitionScale: 1,
+  },
+  [READING_MODES.SCANNING]: {
+    brightnessScale: 1.06,
+    contrastScale: 1.04,
+    saturateScale: 1.03,
+    tintScale: 0.54,
+    textOutsideScale: 0.62,
+    transitionScale: 0.68,
+  },
+  [READING_MODES.FATIGUE]: {
+    brightnessScale: 0.78,
+    contrastScale: 0.84,
+    saturateScale: 0.82,
+    tintScale: 1.55,
+    textOutsideScale: 1.42,
+    transitionScale: 4,
+  },
+});
+const POINTER_MODE_THRESHOLDS = Object.freeze({
+  movementEpsilonPx: 1.2,
+  fastSpeedPxPerMs: 0.88,
+  fastResetSpeedPxPerMs: 0.5,
+  scanTriggerMs: 1200,
+  scanExitSpeedPxPerMs: 0.42,
+  scanExitHoldMs: 360,
+  fatigueIdleMs: 7000,
+  slowSpeedPxPerMs: 0.08,
+  slowResetSpeedPxPerMs: 0.22,
+  fatigueTriggerMs: 1600,
+  fatigueExitSpeedPxPerMs: 0.36,
+  speedDecayTauMs: 360,
+  decayAfterIdleMs: 100,
+});
 
 let settings = { ...SETTINGS_DEFAULTS };
 let overlayRoot = null;
@@ -31,6 +77,8 @@ let renderedCoordinate = null;
 let animationFrameId = null;
 let animationLastTimestamp = 0;
 let lastTextTintUpdateTimestamp = 0;
+let activeReadingMode = READING_MODES.FOCUSED;
+let pointerMotionState = createPointerMotionState();
 
 initialize().catch((error) => {
   console.error('Coordinate Dimming Lens initialization failed:', error);
@@ -39,6 +87,7 @@ initialize().catch((error) => {
 async function initialize() {
   settings = await loadSettings();
   ensureOverlay();
+  setReadingMode(READING_MODES.FOCUSED, true);
   trackPointer();
   applyCoordinate(null);
   startPolling();
@@ -201,6 +250,8 @@ function ensureOverlay() {
 }
 
 async function requestCoordinate() {
+  updateReadingMode(performance.now());
+
   if (!settings.enabled || !settings.localUrl) {
     applyCoordinate(null);
     return;
@@ -229,10 +280,14 @@ async function requestCoordinate() {
 
 function trackPointer() {
   const updatePointer = (event) => {
+    const now = performance.now();
     lastPointerCoordinate = {
       x: event.clientX,
       y: event.clientY,
     };
+
+    updatePointerMotion(event.clientX, event.clientY, now);
+    updateReadingMode(now);
   };
 
   window.addEventListener('pointermove', updatePointer, { passive: true, capture: true });
@@ -342,6 +397,8 @@ function stepFocusAnimation(timestamp) {
     return;
   }
 
+  updateReadingMode(timestamp);
+
   if (!renderedCoordinate) {
     renderedCoordinate = { ...targetCoordinate };
   }
@@ -349,7 +406,7 @@ function stepFocusAnimation(timestamp) {
   const deltaMs = animationLastTimestamp > 0 ? Math.max(0, timestamp - animationLastTimestamp) : 16;
   animationLastTimestamp = timestamp;
 
-  const transitionMs = clampNumber(settings.transitionMs, 180, 2000, SETTINGS_DEFAULTS.transitionMs);
+  const transitionMs = resolveActiveTransitionMs();
   const alpha = transitionMs <= 0 ? 1 : 1 - Math.exp(-deltaMs / transitionMs);
 
   renderedCoordinate = {
@@ -388,6 +445,7 @@ function applyOverlayVisualState(overlay, coordinate) {
   const maxFeather = Math.max(4, Math.min(radiusX, radiusY) - 2);
   const feather = clampNumber(coordinate.feather, 4, Math.min(600, maxFeather), SETTINGS_DEFAULTS.feather);
   const stops = resolveFeatherStops(radiusX, radiusY, feather);
+  const visualState = resolveModeAdjustedVisualState();
 
   overlay.style.setProperty('--shrimp-focus-x', `${Math.round(coordinate.x)}px`);
   overlay.style.setProperty('--shrimp-focus-y', `${Math.round(coordinate.y)}px`);
@@ -395,10 +453,10 @@ function applyOverlayVisualState(overlay, coordinate) {
   overlay.style.setProperty('--shrimp-focus-radius-y', `${Math.round(radiusY)}px`);
   overlay.style.setProperty('--shrimp-focus-inner-stop', `${stops.inner.toFixed(2)}%`);
   overlay.style.setProperty('--shrimp-focus-outer-stop', `${stops.outer.toFixed(2)}%`);
-  overlay.style.setProperty('--shrimp-brightness', String(clampNumber(settings.brightness, 0.5, 1.2, SETTINGS_DEFAULTS.brightness)));
-  overlay.style.setProperty('--shrimp-contrast', String(clampNumber(settings.contrast, 0.5, 1.2, SETTINGS_DEFAULTS.contrast)));
-  overlay.style.setProperty('--shrimp-saturate', String(clampNumber(settings.saturate, 0.5, 1.5, SETTINGS_DEFAULTS.saturate)));
-  overlay.style.setProperty('--shrimp-tint', String(clampNumber(settings.overlayTint, 0, 0.35, SETTINGS_DEFAULTS.overlayTint)));
+  overlay.style.setProperty('--shrimp-brightness', String(visualState.brightness));
+  overlay.style.setProperty('--shrimp-contrast', String(visualState.contrast));
+  overlay.style.setProperty('--shrimp-saturate', String(visualState.saturate));
+  overlay.style.setProperty('--shrimp-tint', String(visualState.overlayTint));
 }
 
 function resolveFeatherStops(radiusX, radiusY, feather) {
@@ -500,7 +558,7 @@ function applyOutsideTintStyle(element, outsideStrength, transitionMs) {
 }
 
 function resolveTextTintTransitionMs() {
-  const motionMs = clampNumber(settings.transitionMs, 180, 2000, SETTINGS_DEFAULTS.transitionMs);
+  const motionMs = resolveActiveTransitionMs();
   return Math.round(Math.max(TEXT_TINT_MIN_TRANSITION_MS, motionMs));
 }
 
@@ -567,12 +625,197 @@ function resolveOutsideStrength(rect, coordinate) {
   const softBand = Math.max(0.06, Math.min(0.95, featherPx / Math.max(8, Math.min(radiusX, radiusY))));
   const raw = (normalizedDistance - 1) / softBand;
   const clamped = Math.max(0, Math.min(1, raw));
+  const baseStrength = smoothStep(clamped);
+  const modeScaledStrength = baseStrength * resolveActiveModePreset().textOutsideScale;
 
-  return smoothStep(clamped);
+  return Math.max(0, Math.min(1, modeScaledStrength));
 }
 
 function smoothStep(value) {
   return value * value * (3 - 2 * value);
+}
+
+function createPointerMotionState() {
+  const now = performance.now();
+  return {
+    lastSampleX: null,
+    lastSampleY: null,
+    lastSampleTimestamp: now,
+    lastDecayTimestamp: now,
+    lastMovementTimestamp: now,
+    smoothedSpeed: 0,
+    fastStartTimestamp: 0,
+    slowStartTimestamp: 0,
+    scanExitStartTimestamp: 0,
+  };
+}
+
+function updatePointerMotion(x, y, timestamp) {
+  if (pointerMotionState.lastSampleX === null || pointerMotionState.lastSampleY === null) {
+    pointerMotionState.lastSampleX = x;
+    pointerMotionState.lastSampleY = y;
+    pointerMotionState.lastSampleTimestamp = timestamp;
+    pointerMotionState.lastDecayTimestamp = timestamp;
+    pointerMotionState.lastMovementTimestamp = timestamp;
+    pointerMotionState.smoothedSpeed = 0;
+    return;
+  }
+
+  const dt = Math.max(1, timestamp - pointerMotionState.lastSampleTimestamp);
+  const dx = x - pointerMotionState.lastSampleX;
+  const dy = y - pointerMotionState.lastSampleY;
+  const distance = Math.hypot(dx, dy);
+  const instantSpeed = distance / dt;
+  const smoothingFactor = 0.26;
+
+  pointerMotionState.smoothedSpeed =
+    pointerMotionState.smoothedSpeed * (1 - smoothingFactor) + instantSpeed * smoothingFactor;
+
+  if (distance >= POINTER_MODE_THRESHOLDS.movementEpsilonPx) {
+    pointerMotionState.lastMovementTimestamp = timestamp;
+  }
+
+  pointerMotionState.lastSampleX = x;
+  pointerMotionState.lastSampleY = y;
+  pointerMotionState.lastSampleTimestamp = timestamp;
+  pointerMotionState.lastDecayTimestamp = timestamp;
+}
+
+function updateReadingMode(timestamp) {
+  const now = typeof timestamp === 'number' ? timestamp : performance.now();
+  decayPointerSpeed(now);
+
+  const speed = Math.max(0, pointerMotionState.smoothedSpeed);
+  const idleMs = Math.max(0, now - pointerMotionState.lastMovementTimestamp);
+  const idleLongEnough = idleMs >= POINTER_MODE_THRESHOLDS.fatigueIdleMs;
+  const slowEnough = speed <= POINTER_MODE_THRESHOLDS.slowSpeedPxPerMs;
+
+  if (speed >= POINTER_MODE_THRESHOLDS.fastSpeedPxPerMs) {
+    if (!pointerMotionState.fastStartTimestamp) {
+      pointerMotionState.fastStartTimestamp = now;
+    }
+  } else if (speed <= POINTER_MODE_THRESHOLDS.fastResetSpeedPxPerMs) {
+    pointerMotionState.fastStartTimestamp = 0;
+  }
+
+  if (idleLongEnough && slowEnough) {
+    if (!pointerMotionState.slowStartTimestamp) {
+      pointerMotionState.slowStartTimestamp = now;
+    }
+  } else if (!idleLongEnough || speed >= POINTER_MODE_THRESHOLDS.slowResetSpeedPxPerMs) {
+    pointerMotionState.slowStartTimestamp = 0;
+  }
+
+  if (activeReadingMode === READING_MODES.FATIGUE && speed >= POINTER_MODE_THRESHOLDS.fatigueExitSpeedPxPerMs) {
+    setReadingMode(READING_MODES.FOCUSED);
+    pointerMotionState.slowStartTimestamp = 0;
+    return;
+  }
+
+  if (
+    activeReadingMode !== READING_MODES.SCANNING &&
+    pointerMotionState.fastStartTimestamp > 0 &&
+    now - pointerMotionState.fastStartTimestamp >= POINTER_MODE_THRESHOLDS.scanTriggerMs
+  ) {
+    setReadingMode(READING_MODES.SCANNING);
+    pointerMotionState.scanExitStartTimestamp = 0;
+    pointerMotionState.slowStartTimestamp = 0;
+    return;
+  }
+
+  if (activeReadingMode === READING_MODES.SCANNING) {
+    if (speed <= POINTER_MODE_THRESHOLDS.scanExitSpeedPxPerMs) {
+      if (!pointerMotionState.scanExitStartTimestamp) {
+        pointerMotionState.scanExitStartTimestamp = now;
+      } else if (now - pointerMotionState.scanExitStartTimestamp >= POINTER_MODE_THRESHOLDS.scanExitHoldMs) {
+        setReadingMode(READING_MODES.FOCUSED);
+        pointerMotionState.scanExitStartTimestamp = 0;
+      }
+    } else {
+      pointerMotionState.scanExitStartTimestamp = 0;
+    }
+    return;
+  }
+
+  if (
+    activeReadingMode !== READING_MODES.FATIGUE &&
+    pointerMotionState.slowStartTimestamp > 0 &&
+    now - pointerMotionState.slowStartTimestamp >= POINTER_MODE_THRESHOLDS.fatigueTriggerMs
+  ) {
+    setReadingMode(READING_MODES.FATIGUE);
+    pointerMotionState.fastStartTimestamp = 0;
+  }
+}
+
+function decayPointerSpeed(now) {
+  const idleSinceSample = now - pointerMotionState.lastSampleTimestamp;
+  const decayDelta = now - pointerMotionState.lastDecayTimestamp;
+
+  if (decayDelta <= 0) {
+    return;
+  }
+
+  pointerMotionState.lastDecayTimestamp = now;
+  if (idleSinceSample <= POINTER_MODE_THRESHOLDS.decayAfterIdleMs || pointerMotionState.smoothedSpeed <= 0) {
+    return;
+  }
+
+  const decayFactor = Math.exp(-decayDelta / POINTER_MODE_THRESHOLDS.speedDecayTauMs);
+  pointerMotionState.smoothedSpeed *= decayFactor;
+}
+
+function setReadingMode(nextMode, force = false) {
+  const targetMode = READING_MODE_PRESETS[nextMode] ? nextMode : READING_MODES.FOCUSED;
+  if (!force && activeReadingMode === targetMode) {
+    return;
+  }
+
+  activeReadingMode = targetMode;
+  if (overlayRoot) {
+    overlayRoot.dataset.readingMode = targetMode;
+  }
+
+  lastTextTintUpdateTimestamp = 0;
+}
+
+function resolveActiveModePreset() {
+  return READING_MODE_PRESETS[activeReadingMode] ?? READING_MODE_PRESETS[READING_MODES.FOCUSED];
+}
+
+function resolveModeAdjustedVisualState() {
+  const modePreset = resolveActiveModePreset();
+  return {
+    brightness: clampNumber(
+      settings.brightness * modePreset.brightnessScale,
+      0.5,
+      1.2,
+      SETTINGS_DEFAULTS.brightness
+    ),
+    contrast: clampNumber(
+      settings.contrast * modePreset.contrastScale,
+      0.5,
+      1.2,
+      SETTINGS_DEFAULTS.contrast
+    ),
+    saturate: clampNumber(
+      settings.saturate * modePreset.saturateScale,
+      0.5,
+      1.5,
+      SETTINGS_DEFAULTS.saturate
+    ),
+    overlayTint: clampNumber(
+      settings.overlayTint * modePreset.tintScale,
+      0,
+      0.35,
+      SETTINGS_DEFAULTS.overlayTint
+    ),
+  };
+}
+
+function resolveActiveTransitionMs() {
+  const baseTransition = clampNumber(settings.transitionMs, 180, 2000, SETTINGS_DEFAULTS.transitionMs);
+  const modePreset = resolveActiveModePreset();
+  return Math.round(clampNumber(baseTransition * modePreset.transitionScale, 140, 6000, baseTransition));
 }
 
 function normalizeSettings(rawSettings) {
