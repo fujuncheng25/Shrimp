@@ -14,6 +14,7 @@ const SETTINGS_DEFAULTS = {
 let settings = { ...SETTINGS_DEFAULTS };
 let overlayRoot = null;
 let pollTimer = null;
+let lastPointerCoordinate = null;
 
 initialize().catch((error) => {
   console.error('Coordinate Dimming Lens initialization failed:', error);
@@ -22,6 +23,7 @@ initialize().catch((error) => {
 async function initialize() {
   settings = await loadSettings();
   ensureOverlay();
+  trackPointer();
   applyCoordinate(null);
   startPolling();
 
@@ -180,15 +182,49 @@ async function requestCoordinate() {
       url: settings.localUrl,
     });
 
-    if (!response?.ok || !response.coordinate) {
+    if (!response?.ok) {
       return;
     }
 
-    const coordinate = resolveCoordinate(response.coordinate, settings.coordinateSpace);
+    const coordinate = response.coordinate
+      ? resolveCoordinate(response.coordinate, settings.coordinateSpace)
+      : resolvePointerCoordinate();
     applyCoordinate(coordinate);
   } catch (error) {
     console.warn('Coordinate Dimming Lens request failed:', error);
   }
+}
+
+function trackPointer() {
+  const updatePointer = (event) => {
+    lastPointerCoordinate = {
+      x: event.clientX,
+      y: event.clientY,
+    };
+  };
+
+  window.addEventListener('pointermove', updatePointer, { passive: true, capture: true });
+  window.addEventListener('pointerdown', updatePointer, { passive: true, capture: true });
+  window.addEventListener('mousemove', updatePointer, { passive: true, capture: true });
+}
+
+function resolvePointerCoordinate() {
+  const pointer = lastPointerCoordinate;
+  if (!pointer) {
+    return {
+      x: window.innerWidth / 2,
+      y: window.innerHeight / 2,
+      radius: clampNumber(settings.focusRadius, 40, 1200, SETTINGS_DEFAULTS.focusRadius),
+      feather: clampNumber(settings.feather, 4, 400, SETTINGS_DEFAULTS.feather),
+    };
+  }
+
+  return {
+    x: clampNumber(pointer.x, -100000, 100000, window.innerWidth / 2),
+    y: clampNumber(pointer.y, -100000, 100000, window.innerHeight / 2),
+    radius: clampNumber(settings.focusRadius, 40, 1200, SETTINGS_DEFAULTS.focusRadius),
+    feather: clampNumber(settings.feather, 4, 400, SETTINGS_DEFAULTS.feather),
+  };
 }
 
 function resolveCoordinate(coordinate, coordinateSpace) {

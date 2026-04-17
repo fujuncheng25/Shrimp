@@ -106,6 +106,11 @@ async function testEndpoint() {
       setStatus(`接口测试失败：${response?.error ?? 'unknown-error'}`);
       return;
     }
+    if (!response.coordinate) {
+      setStatus('接口可用，但没有返回坐标；页面将使用当前鼠标位置作为输入。');
+      return;
+    }
+
     const coordinate = response.coordinate;
     setStatus(`接口可用，读取到坐标：x=${Math.round(coordinate.x)}, y=${Math.round(coordinate.y)}，基准=${coordinate.space}`);
   } catch (error) {

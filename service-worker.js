@@ -38,10 +38,10 @@ async function fetchCoordinate(url) {
     const parsed = parseCoordinatePayload(rawText, response.headers.get('content-type'));
 
     if (!parsed) {
-      return { ok: false, error: 'unrecognized-payload' };
+      return { ok: true, coordinate: null, raw: rawText, fallback: 'cursor' };
     }
 
-    return { ok: true, coordinate: parsed.coordinate, raw: parsed.raw };
+    return { ok: true, coordinate: parsed.coordinate, raw: parsed.raw, fallback: 'cursor' };
   } finally {
     clearTimeout(timeoutId);
   }
