@@ -16,8 +16,10 @@
 
 body {
   margin: 0;
-  width: 380px;
-  min-height: 560px;
+  width: 520px;
+  min-height: 640px;
+  max-height: 720px;
+  overflow-y: auto;
   font-family: "Trebuchet MS", "Segoe UI Variable", "Gill Sans", sans-serif;
   color: var(--text);
   background:
@@ -27,7 +29,7 @@ body {
 }
 
 .shell {
-  padding: 16px;
+  padding: 18px;
 }
 
 .hero {
@@ -109,7 +111,7 @@ select:focus {
 }
 
 .three-up {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .toggle {
@@ -164,11 +166,12 @@ button.ghost {
   min-height: 36px;
 }
 
-@media (max-width: 420px) {
+@media (max-width: 560px) {
   body {
     width: 100%;
   }
 
+  .two-up,
   .three-up {
     grid-template-columns: 1fr;
   }
