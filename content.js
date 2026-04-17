@@ -8,7 +8,7 @@ const SETTINGS_DEFAULTS = {
   focusOffsetX: 0,
   focusOffsetY: 0,
   feather: 96,
-  transitionMs: 220,
+  transitionMs: 320,
   brightness: 0.96,
   contrast: 0.88,
   saturate: 0.92,
@@ -17,7 +17,8 @@ const SETTINGS_DEFAULTS = {
 
 const OUTSIDE_TEXT_CLASS = 'shrimp-coordinate-lens__outside-text';
 const MAX_TINTED_TEXT_ELEMENTS = 2200;
-const TEXT_TINT_UPDATE_INTERVAL_MS = 120;
+const TEXT_TINT_UPDATE_INTERVAL_MS = 80;
+const TEXT_TINT_MIN_TRANSITION_MS = 220;
 const EXCLUDED_TINT_TAGS = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEXTAREA', 'INPUT', 'SELECT', 'OPTION']);
 
 let settings = { ...SETTINGS_DEFAULTS };
@@ -185,9 +186,12 @@ function ensureOverlay() {
     }
 
     .${OUTSIDE_TEXT_CLASS} {
-      color: rgba(136, 214, 154, 0.95) !important;
-      -webkit-text-fill-color: rgba(136, 214, 154, 0.95) !important;
-      transition: color 260ms ease-out, -webkit-text-fill-color 260ms ease-out;
+      --shrimp-outside-weight: 0%;
+      --shrimp-inside-weight: 100%;
+      --shrimp-text-transition-ms: 320ms;
+      color: color-mix(in srgb, currentColor var(--shrimp-inside-weight), rgba(136, 214, 154, 0.95) var(--shrimp-outside-weight)) !important;
+      -webkit-text-fill-color: color-mix(in srgb, currentColor var(--shrimp-inside-weight), rgba(136, 214, 154, 0.95) var(--shrimp-outside-weight)) !important;
+      transition: color var(--shrimp-text-transition-ms) ease-out, -webkit-text-fill-color var(--shrimp-text-transition-ms) ease-out;
     }
   `;
 
@@ -345,7 +349,7 @@ function stepFocusAnimation(timestamp) {
   const deltaMs = animationLastTimestamp > 0 ? Math.max(0, timestamp - animationLastTimestamp) : 16;
   animationLastTimestamp = timestamp;
 
-  const transitionMs = clampNumber(settings.transitionMs, 0, 2000, SETTINGS_DEFAULTS.transitionMs);
+  const transitionMs = clampNumber(settings.transitionMs, 180, 2000, SETTINGS_DEFAULTS.transitionMs);
   const alpha = transitionMs <= 0 ? 1 : 1 - Math.exp(-deltaMs / transitionMs);
 
   renderedCoordinate = {
@@ -440,6 +444,7 @@ function updateOutsideTextTint(coordinate, timestamp, force) {
 
   lastTextTintUpdateTimestamp = now;
   const nextTinted = new Set();
+  const textTransitionMs = resolveTextTintTransitionMs();
   const textElements = collectTintCandidates(MAX_TINTED_TEXT_ELEMENTS);
 
   for (const element of textElements) {
@@ -448,9 +453,9 @@ function updateOutsideTextTint(coordinate, timestamp, force) {
       continue;
     }
 
-    if (isElementOutsideFocus(rect, coordinate)) {
-      nextTinted.add(element);
-    }
+    const outsideStrength = resolveOutsideStrength(rect, coordinate);
+    applyOutsideTintStyle(element, outsideStrength, textTransitionMs);
+    nextTinted.add(element);
   }
 
   for (const element of outsideTintedElements) {
@@ -460,12 +465,9 @@ function updateOutsideTextTint(coordinate, timestamp, force) {
 
     if (element.isConnected) {
       element.classList.remove(OUTSIDE_TEXT_CLASS);
-    }
-  }
-
-  for (const element of nextTinted) {
-    if (!outsideTintedElements.has(element)) {
-      element.classList.add(OUTSIDE_TEXT_CLASS);
+      element.style.removeProperty('--shrimp-outside-weight');
+      element.style.removeProperty('--shrimp-inside-weight');
+      element.style.removeProperty('--shrimp-text-transition-ms');
     }
   }
 
@@ -476,11 +478,30 @@ function clearOutsideTextTint() {
   for (const element of outsideTintedElements) {
     if (element.isConnected) {
       element.classList.remove(OUTSIDE_TEXT_CLASS);
+      element.style.removeProperty('--shrimp-outside-weight');
+      element.style.removeProperty('--shrimp-inside-weight');
+      element.style.removeProperty('--shrimp-text-transition-ms');
     }
   }
 
   outsideTintedElements = new Set();
   lastTextTintUpdateTimestamp = 0;
+}
+
+function applyOutsideTintStyle(element, outsideStrength, transitionMs) {
+  const strength = Math.max(0, Math.min(1, outsideStrength));
+  const outsideWeight = `${(strength * 100).toFixed(2)}%`;
+  const insideWeight = `${(100 - strength * 100).toFixed(2)}%`;
+
+  element.classList.add(OUTSIDE_TEXT_CLASS);
+  element.style.setProperty('--shrimp-outside-weight', outsideWeight);
+  element.style.setProperty('--shrimp-inside-weight', insideWeight);
+  element.style.setProperty('--shrimp-text-transition-ms', `${transitionMs}ms`);
+}
+
+function resolveTextTintTransitionMs() {
+  const motionMs = clampNumber(settings.transitionMs, 180, 2000, SETTINGS_DEFAULTS.transitionMs);
+  return Math.round(Math.max(TEXT_TINT_MIN_TRANSITION_MS, motionMs));
 }
 
 function collectTintCandidates(limit) {
@@ -533,16 +554,25 @@ function isTintEligibleElement(element) {
   return true;
 }
 
-function isElementOutsideFocus(rect, coordinate) {
+function resolveOutsideStrength(rect, coordinate) {
   const nearestX = Math.max(rect.left, Math.min(coordinate.x, rect.right));
   const nearestY = Math.max(rect.top, Math.min(coordinate.y, rect.bottom));
   const dx = nearestX - coordinate.x;
   const dy = nearestY - coordinate.y;
   const radiusX = Math.max(4, coordinate.radiusX);
   const radiusY = Math.max(4, coordinate.radiusY);
-  const normalizedDistance = (dx * dx) / (radiusX * radiusX) + (dy * dy) / (radiusY * radiusY);
+  const normalizedDistance = Math.sqrt((dx * dx) / (radiusX * radiusX) + (dy * dy) / (radiusY * radiusY));
 
-  return normalizedDistance > 1;
+  const featherPx = Math.max(4, coordinate.feather ?? SETTINGS_DEFAULTS.feather);
+  const softBand = Math.max(0.06, Math.min(0.95, featherPx / Math.max(8, Math.min(radiusX, radiusY))));
+  const raw = (normalizedDistance - 1) / softBand;
+  const clamped = Math.max(0, Math.min(1, raw));
+
+  return smoothStep(clamped);
+}
+
+function smoothStep(value) {
+  return value * value * (3 - 2 * value);
 }
 
 function normalizeSettings(rawSettings) {
@@ -560,7 +590,7 @@ function normalizeSettings(rawSettings) {
     focusOffsetX: clampNumber(source.focusOffsetX, -3000, 3000, SETTINGS_DEFAULTS.focusOffsetX),
     focusOffsetY: clampNumber(source.focusOffsetY, -3000, 3000, SETTINGS_DEFAULTS.focusOffsetY),
     feather: clampNumber(source.feather, 4, Math.min(600, maxFeather), SETTINGS_DEFAULTS.feather),
-    transitionMs: clampNumber(source.transitionMs, 0, 2000, SETTINGS_DEFAULTS.transitionMs),
+    transitionMs: clampNumber(source.transitionMs, 180, 2000, SETTINGS_DEFAULTS.transitionMs),
     brightness: clampNumber(source.brightness, 0.5, 1.2, SETTINGS_DEFAULTS.brightness),
     contrast: clampNumber(source.contrast, 0.5, 1.2, SETTINGS_DEFAULTS.contrast),
     saturate: clampNumber(source.saturate, 0.5, 1.5, SETTINGS_DEFAULTS.saturate),
