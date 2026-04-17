@@ -11,10 +11,15 @@ const SETTINGS_DEFAULTS = {
   overlayTint: 0.08,
 };
 
+const OUTSIDE_TEXT_CLASS = 'shrimp-coordinate-lens__outside-text';
+const MAX_TINTED_TEXT_ELEMENTS = 2200;
+const EXCLUDED_TINT_TAGS = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEXTAREA', 'INPUT', 'SELECT', 'OPTION']);
+
 let settings = { ...SETTINGS_DEFAULTS };
 let overlayRoot = null;
 let pollTimer = null;
 let lastPointerCoordinate = null;
+let outsideTintedElements = new Set();
 
 initialize().catch((error) => {
   console.error('Coordinate Dimming Lens initialization failed:', error);
@@ -163,6 +168,12 @@ function ensureOverlay() {
       mix-blend-mode: screen;
       opacity: 0.9;
     }
+
+    .${OUTSIDE_TEXT_CLASS} {
+      color: rgba(136, 214, 154, 0.95) !important;
+      -webkit-text-fill-color: rgba(136, 214, 154, 0.95) !important;
+      transition: color 120ms linear, -webkit-text-fill-color 120ms linear;
+    }
   `;
 
   document.documentElement.appendChild(style);
@@ -270,6 +281,7 @@ function applyCoordinate(coordinate) {
 
   if (!coordinate) {
     overlay.classList.remove('shrimp-coordinate-lens--active');
+    clearOutsideTextTint();
     return;
   }
 
@@ -282,6 +294,116 @@ function applyCoordinate(coordinate) {
   overlay.style.setProperty('--shrimp-contrast', String(clampNumber(settings.contrast, 0.5, 1.2, SETTINGS_DEFAULTS.contrast)));
   overlay.style.setProperty('--shrimp-saturate', String(clampNumber(settings.saturate, 0.5, 1.5, SETTINGS_DEFAULTS.saturate)));
   overlay.style.setProperty('--shrimp-tint', String(clampNumber(settings.overlayTint, 0, 0.35, SETTINGS_DEFAULTS.overlayTint)));
+  updateOutsideTextTint(coordinate);
+}
+
+function updateOutsideTextTint(coordinate) {
+  if (!document.body || !coordinate) {
+    clearOutsideTextTint();
+    return;
+  }
+
+  const nextTinted = new Set();
+  const textElements = collectTintCandidates(MAX_TINTED_TEXT_ELEMENTS);
+
+  for (const element of textElements) {
+    const rect = element.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      continue;
+    }
+
+    if (isElementOutsideFocus(rect, coordinate)) {
+      nextTinted.add(element);
+    }
+  }
+
+  for (const element of outsideTintedElements) {
+    if (nextTinted.has(element)) {
+      continue;
+    }
+
+    if (element.isConnected) {
+      element.classList.remove(OUTSIDE_TEXT_CLASS);
+    }
+  }
+
+  for (const element of nextTinted) {
+    if (!outsideTintedElements.has(element)) {
+      element.classList.add(OUTSIDE_TEXT_CLASS);
+    }
+  }
+
+  outsideTintedElements = nextTinted;
+}
+
+function clearOutsideTextTint() {
+  for (const element of outsideTintedElements) {
+    if (element.isConnected) {
+      element.classList.remove(OUTSIDE_TEXT_CLASS);
+    }
+  }
+
+  outsideTintedElements = new Set();
+}
+
+function collectTintCandidates(limit) {
+  const candidates = new Set();
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+
+  while (candidates.size < limit) {
+    const node = walker.nextNode();
+    if (!node) {
+      break;
+    }
+
+    if (!node.nodeValue || !node.nodeValue.trim()) {
+      continue;
+    }
+
+    const parent = node.parentElement;
+    if (!isTintEligibleElement(parent)) {
+      continue;
+    }
+
+    candidates.add(parent);
+  }
+
+  return candidates;
+}
+
+function isTintEligibleElement(element) {
+  if (!element || !element.isConnected) {
+    return false;
+  }
+
+  if (element.classList.contains(OUTSIDE_TEXT_CLASS)) {
+    return true;
+  }
+
+  if (EXCLUDED_TINT_TAGS.has(element.tagName)) {
+    return false;
+  }
+
+  if (element.closest('#shrimp-coordinate-lens')) {
+    return false;
+  }
+
+  const computed = window.getComputedStyle(element);
+  if (computed.display === 'none' || computed.visibility === 'hidden' || Number(computed.opacity) === 0) {
+    return false;
+  }
+
+  return true;
+}
+
+function isElementOutsideFocus(rect, coordinate) {
+  const nearestX = Math.max(rect.left, Math.min(coordinate.x, rect.right));
+  const nearestY = Math.max(rect.top, Math.min(coordinate.y, rect.bottom));
+  const dx = nearestX - coordinate.x;
+  const dy = nearestY - coordinate.y;
+  const radius = Math.max(4, coordinate.radius);
+
+  return dx * dx + dy * dy > radius * radius;
 }
 
 function clampNumber(value, min, max, fallback) {
