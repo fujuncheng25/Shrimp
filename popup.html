@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Coordinate Dimming Lens</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <p class="eyebrow">Coordinate Dimming Lens</p>
+        <h1>本地坐标驱动的页面聚焦</h1>
+        <p class="lede">输入一个本地 URL，扩展会读取坐标并让焦点区域以外的内容轻微降亮、降对比度。</p>
+      </header>
+
+      <section class="card">
+        <label>
+          本地坐标 URL
+          <input id="localUrl" type="url" placeholder="http://127.0.0.1:3000/coordinate" />
+        </label>
+
+        <div class="grid two-up">
+          <label>
+            坐标基准
+            <select id="coordinateSpace">
+              <option value="auto">auto</option>
+              <option value="viewport">viewport</option>
+              <option value="document">document</option>
+            </select>
+          </label>
+
+          <label>
+            刷新间隔（ms）
+            <input id="pollInterval" type="number" min="300" max="10000" step="100" />
+          </label>
+        </div>
+
+        <div class="grid three-up">
+          <label>
+            聚焦半径
+            <input id="focusRadius" type="number" min="40" max="1200" step="10" />
+          </label>
+
+          <label>
+            边缘过渡
+            <input id="feather" type="number" min="4" max="400" step="4" />
+          </label>
+
+          <label>
+            叠层透明度
+            <input id="overlayTint" type="number" min="0" max="0.35" step="0.01" />
+          </label>
+        </div>
+
+        <div class="grid three-up">
+          <label>
+            亮度
+            <input id="brightness" type="number" min="0.5" max="1.2" step="0.01" />
+          </label>
+
+          <label>
+            对比度
+            <input id="contrast" type="number" min="0.5" max="1.2" step="0.01" />
+          </label>
+
+          <label>
+            饱和度
+            <input id="saturate" type="number" min="0.5" max="1.5" step="0.01" />
+          </label>
+        </div>
+
+        <label class="toggle">
+          <input id="enabled" type="checkbox" />
+          <span>启用扩展</span>
+        </label>
+
+        <div class="actions">
+          <button id="saveBtn" type="button">保存</button>
+          <button id="testBtn" type="button" class="ghost">测试接口</button>
+        </div>
+
+        <p class="status" id="status">尚未读取配置。</p>
+      </section>
+    </main>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

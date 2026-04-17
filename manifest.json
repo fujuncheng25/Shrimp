@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Coordinate Dimming Lens",
+  "version": "0.1.0",
+  "description": "从本地 URL 读取坐标，并对页面中远离该坐标的内容做轻微降对比度处理。",
+  "permissions": ["storage", "permissions"],
+  "optional_host_permissions": ["http://*/*", "https://*/*"],
+  "background": {
+    "service_worker": "service-worker.js"
+  },
+  "action": {
+    "default_title": "Coordinate Dimming Lens",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
