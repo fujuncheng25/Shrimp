@@ -50,6 +50,7 @@ const OUTSIDE_TEXT_CLASS = 'shrimp-coordinate-lens__outside-text';
 const MAX_TINTED_TEXT_ELEMENTS = 2200;
 const TEXT_TINT_UPDATE_INTERVAL_MS = 80;
 const TEXT_TINT_MIN_TRANSITION_MS = 220;
+const TEXT_INSIDE_MAX_SCALE = 1.16;
 const EXCLUDED_TINT_TAGS = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEXTAREA', 'INPUT', 'SELECT', 'OPTION']);
 const READING_MODES = Object.freeze({
   FOCUSED: 'focused-reading',
@@ -258,9 +259,11 @@ function ensureOverlay() {
       --shrimp-outside-weight: 0%;
       --shrimp-inside-weight: 100%;
       --shrimp-text-transition-ms: 320ms;
+      --shrimp-inside-font-scale: 1;
       color: color-mix(in srgb, currentColor var(--shrimp-inside-weight), rgba(136, 214, 154, 0.95) var(--shrimp-outside-weight)) !important;
       -webkit-text-fill-color: color-mix(in srgb, currentColor var(--shrimp-inside-weight), rgba(136, 214, 154, 0.95) var(--shrimp-outside-weight)) !important;
-      transition: color var(--shrimp-text-transition-ms) ease-out, -webkit-text-fill-color var(--shrimp-text-transition-ms) ease-out;
+      font-size: calc(1em * var(--shrimp-inside-font-scale)) !important;
+      transition: color var(--shrimp-text-transition-ms) ease-out, -webkit-text-fill-color var(--shrimp-text-transition-ms) ease-out, font-size var(--shrimp-text-transition-ms) ease-out;
     }
   `;
 
@@ -546,6 +549,7 @@ function updateOutsideTextTint(coordinate, timestamp, force) {
       element.style.removeProperty('--shrimp-outside-weight');
       element.style.removeProperty('--shrimp-inside-weight');
       element.style.removeProperty('--shrimp-text-transition-ms');
+      element.style.removeProperty('--shrimp-inside-font-scale');
     }
   }
 
@@ -559,6 +563,7 @@ function clearOutsideTextTint() {
       element.style.removeProperty('--shrimp-outside-weight');
       element.style.removeProperty('--shrimp-inside-weight');
       element.style.removeProperty('--shrimp-text-transition-ms');
+      element.style.removeProperty('--shrimp-inside-font-scale');
     }
   }
 
@@ -570,11 +575,14 @@ function applyOutsideTintStyle(element, outsideStrength, transitionMs) {
   const strength = Math.max(0, Math.min(1, outsideStrength));
   const outsideWeight = `${(strength * 100).toFixed(2)}%`;
   const insideWeight = `${(100 - strength * 100).toFixed(2)}%`;
+  const insideStrength = 1 - strength;
+  const insideScale = 1 + insideStrength * (TEXT_INSIDE_MAX_SCALE - 1);
 
   element.classList.add(OUTSIDE_TEXT_CLASS);
   element.style.setProperty('--shrimp-outside-weight', outsideWeight);
   element.style.setProperty('--shrimp-inside-weight', insideWeight);
   element.style.setProperty('--shrimp-text-transition-ms', `${transitionMs}ms`);
+  element.style.setProperty('--shrimp-inside-font-scale', insideScale.toFixed(3));
 }
 
 function resolveTextTintTransitionMs() {
